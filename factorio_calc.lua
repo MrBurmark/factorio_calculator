@@ -1,4 +1,3 @@
-#!/usr/bin/lua
 --[[
    Factorio item crafting calculator
 ]]
