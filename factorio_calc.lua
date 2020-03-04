@@ -6,16 +6,33 @@ function item_make_id(items, item_name)
 
   local item_names_to_ids          = items.names_to_ids
   local item_names                 = items.names
+  local item_types                 = items.types
   local item_ingredient_in_recipes = items.ingredient_in_recipes
   local item_product_in_recipes    = items.product_in_recipes
+
+  assert(item_names_to_ids[item_name] == nil)
 
   local item_id = #item_names+1
   item_names_to_ids[item_name]        = item_id
   item_names[item_id]                 = item_name
+  item_types[item_id]                 = 0
   item_ingredient_in_recipes[item_id] = {}
   item_product_in_recipes[item_id]    = {}
 
   return item_id
+end
+
+function item_add_type(items, item_id, item_type)
+
+  local item_types              = items.types
+  local item_type_names_to_vals = items.type_names_to_vals
+
+  local item_type_val = item_type_names_to_vals[item_type]
+
+  assert(item_type_val ~= nil)
+  assert((item_types[item_id] % (2*item_type_val)) < item_type_val)
+
+  item_types[item_id] = item_types[item_id] + item_type_val
 end
 
 function recipe_make_id(recipes, recipe_name)
@@ -27,6 +44,7 @@ function recipe_make_id(recipes, recipe_name)
   local recipe_ingredient_amounts = recipes.ingredient_amounts
   local recipe_product_ids        = recipes.product_ids
   local recipe_product_amounts    = recipes.product_amounts
+  local recipe_allowed            = recipes.allowed
 
   local recipe_id = #recipe_names+1
   recipe_names_to_ids[recipe_name]     = recipe_id
@@ -36,23 +54,34 @@ function recipe_make_id(recipes, recipe_name)
   recipe_ingredient_amounts[recipe_id] = {}
   recipe_product_ids[recipe_id]        = {}
   recipe_product_amounts[recipe_id]    = {}
+  recipe_allowed[recipe_id]            = true
 
   return recipe_id
 end
 
-function recipe_add_ingredient(recipes, items, recipe_id, item_name, item_amount)
+function recipe_add_ingredient(recipes, items, recipe_id, item_name, item_amount, item_type)
 
   local item_names_to_ids          = items.names_to_ids
+  local item_types                 = items.types
   local item_ingredient_in_recipes = items.ingredient_in_recipes
+  local item_type_names_to_vals    = items.type_names_to_vals
 
   local recipe_ingredient_ids     = recipes.ingredient_ids[recipe_id]
   local recipe_ingredient_amounts = recipes.ingredient_amounts[recipe_id]
 
   -- get existing item id or make new one
   local item_id = item_names_to_ids[item_name] or item_make_id(items, item_name)
+
   -- handle item fields
   local item_ingredient = item_ingredient_in_recipes[item_id]
   item_ingredient[#item_ingredient+1] = recipe_id
+  if item_type then
+    local item_type_val = item_type_names_to_vals[item_type]
+    assert(item_type_val ~= nil)
+    if (item_types[item_id] % (2*item_type_val) < item_type_val) then
+      item_types[item_id] = item_types[item_id] + item_type_val
+    end
+  end
 
   -- handle recipe fields
   recipe_ingredient_ids[#recipe_ingredient_ids+1]         = item_id
@@ -60,19 +89,29 @@ function recipe_add_ingredient(recipes, items, recipe_id, item_name, item_amount
 
 end
 
-function recipe_add_product(recipes, items, recipe_id, item_name, item_amount)
+function recipe_add_product(recipes, items, recipe_id, item_name, item_amount, item_type)
 
   local item_names_to_ids       = items.names_to_ids
+  local item_types              = items.types
   local item_product_in_recipes = items.product_in_recipes
+  local item_type_names_to_vals = items.type_names_to_vals
 
   local recipe_product_ids     = recipes.product_ids[recipe_id]
   local recipe_product_amounts = recipes.product_amounts[recipe_id]
 
   -- get existing item id or make new one
   local item_id = item_names_to_ids[item_name] or item_make_id(items, item_name)
+
   -- handle item fields
   local item_product = item_product_in_recipes[item_id]
   item_product[#item_product+1] = recipe_id
+  if item_type then
+    local item_type_val = item_type_names_to_vals[item_type]
+    assert(item_type_val ~= nil)
+    if (item_types[item_id] % (2*item_type_val) < item_type_val) then
+      item_types[item_id] = item_types[item_id] + item_type_val
+    end
+  end
 
   -- handle recipe fields
   recipe_product_ids[#recipe_product_ids+1]         = item_id
@@ -91,17 +130,41 @@ function parse_recipes(recipes, items)
   --   print(k,v)
   -- end
 
-  local item_names_to_ids = items.names_to_ids
+  local item_names_to_ids       = items.names_to_ids
+  local item_types              = items.types
 
-  local recipe_times   = recipes.times
-  local recipe_allowed = recipes.allowed
+  local recipe_times               = recipes.times
+  local recipe_allowed             = recipes.allowed
   local recipe_disallowed_patterns = recipes.disallowed_patterns
+
+  -- fill resources
+  assert(factorio_data.resource ~= nil)
+  for item_name,item in pairs(factorio_data.resource) do
+    local item_id = item_names_to_ids[item_name]
+    if item_id == nil then
+      item_id = item_make_id(items, item_name)
+    end
+    item_add_type(items, item_id, item.type)
+  end
+
+  -- fill fluids
+  assert(factorio_data.fluid ~= nil)
+  for item_name,item in pairs(factorio_data.fluid) do
+    local item_id = item_names_to_ids[item_name]
+    if item_id == nil then
+      item_id = item_make_id(items, item_name)
+    end
+    item_add_type(items, item_id, item.type)
+  end
 
   -- fill items
   assert(factorio_data.item ~= nil)
   for item_name,item in pairs(factorio_data.item) do
-    assert(item_names_to_ids[item_name] == nil)
-    item_make_id(items, item_name)
+    local item_id = item_names_to_ids[item_name]
+    if item_id == nil then
+      item_id = item_make_id(items, item_name)
+    end
+    item_add_type(items, item_id, item.type)
   end
 
   -- fill recipes
@@ -109,9 +172,9 @@ function parse_recipes(recipes, items)
   for recipe_name,recipe in pairs(factorio_data.recipe) do
 
     local recipe_id = recipe_make_id(recipes, recipe_name)
-    recipe_allowed[recipe_id] = true
 
     -- check if allowed
+    recipe_allowed[recipe_id] = true
     for p=1,#recipe_disallowed_patterns do
       local pattern = recipe_disallowed_patterns[p]
       if string.find(recipe_name, pattern) ~= nil then
@@ -133,7 +196,7 @@ function parse_recipes(recipes, items)
         else
           assert(item.name)
           assert(item.amount > 0)
-          recipe_add_ingredient(recipes, items, recipe_id, item.name, item.amount)
+          recipe_add_ingredient(recipes, items, recipe_id, item.name, item.amount, item.type)
         end
       end
     end
@@ -149,7 +212,7 @@ function parse_recipes(recipes, items)
           assert(item.name)
           assert(item.amount > 0)
           local amount = item.amount * (item.probability or 1) -- uranium-ore has probability
-          recipe_add_product(recipes, items, recipe_id, item.name, amount)
+          recipe_add_product(recipes, items, recipe_id, item.name, amount, item.type)
         end
       end
     else
@@ -246,8 +309,10 @@ function print_item_and_recipe(recipes, items, item_id, rate, print_prefix)
   -- print(string.format("%s '%s' item_id x%g/s", print_prefix, item_id, rate))
 
   local item_name = items.names[item_id]
+  local item_type = items.types[item_id]
+  local item_disallowed = item_type >= items.disallowed_val_cutoff
 
-  local product_in_recipes = items.product_in_recipes[item_id]
+  local product_in_recipes = item_disallowed and {} or items.product_in_recipes[item_id]
   local disallowed_recipes = 0
 
   for i=1,#product_in_recipes do
@@ -277,8 +342,8 @@ function print_item_and_recipe(recipes, items, item_id, rate, print_prefix)
       local recipe_rate = rate / amount
       local recipe_x = recipe_time * recipe_rate
 
-      print(string.format("%s '%s' %g/s - x%g recipe '%s' %.2fs",
-          print_prefix, item_name, rate, recipe_x, recipe_name, recipe_time))
+      print(string.format("%s '%s' %g/s - x%g recipe '%s' x%g %gs",
+          print_prefix, item_name, rate, recipe_x, recipe_name, amount, recipe_time))
 
       print_recipe_and_ingredients(recipes, items, recipe_id, recipe_rate, print_prefix)
 
@@ -297,6 +362,39 @@ end
 
 function main(args)
 
+  local items =
+  {
+    names_to_ids = {}
+   ,names = {}
+   ,types = {}
+   ,ingredient_in_recipes = {}
+   ,product_in_recipes = {}
+   ,type_names_to_vals = {
+      item = 1
+     ,fluid = 2
+     ,resource = 4
+    }
+   ,disallowed_val_cutoff = 2
+  }
+
+  local recipes =
+  {
+    names_to_ids = {}
+   ,names = {}
+   ,times = {}
+   ,ingredient_ids = {}
+   ,ingredient_amounts = {}
+   ,product_ids = {}
+   ,product_amounts = {}
+   ,allowed = {}
+   ,disallowed_patterns =
+    {
+      "fill%-.*%-barrel"
+     ,"empty%-.*%-barrel"
+     ,"kovarex"
+    }
+  }
+
   local help_string = string.format(
       [[Usage: factorio_calc item_name [options]
         Prints the items needed to produce the given item item_name at the
@@ -308,6 +406,9 @@ function main(args)
           -r --rate         the rate in items per second
           --items           print all item names
           -i --item         print items matching the given pattern
+          --recipes         print all recipe names
+          -rp --recipe      print recipes matching the given pattern
+          --expand-fluids   expand fluid production sub-trees (forced if item_name is a fluid)
       ]]
       )
 
@@ -370,6 +471,10 @@ function main(args)
             return os.exit(1)
           end
 
+        elseif arg == "--expand-fluids" then
+
+          items.disallowed_val_cutoff = 2*items.type_names_to_vals.fluid
+
         else
 
           print(string.format("Error parsing unknown option %s", arg))
@@ -389,32 +494,6 @@ function main(args)
     print(string.format("Error no item_name given"))
     return os.exit(1)
   end
-
-  local items =
-  {
-    names_to_ids = {}
-   ,names = {}
-   ,ingredient_in_recipes = {}
-   ,product_in_recipes = {}
-  }
-
-  local recipes =
-  {
-    names_to_ids = {}
-   ,names = {}
-   ,times = {}
-   ,ingredient_ids = {}
-   ,ingredient_amounts = {}
-   ,product_ids = {}
-   ,product_amounts = {}
-   ,allowed = {}
-   ,disallowed_patterns =
-    {
-      "fill%-.*%-barrel"
-     ,"empty%-.*%-barrel"
-     ,"kovarex"
-    }
-  }
 
   parse_recipes(recipes, items)
 
@@ -460,10 +539,13 @@ function main(args)
   end
 
   if #(items.product_in_recipes[item_id]) == 0 then
-
     print(string.format("Item '%s' is the product of no known recipes", item_name))
     return os.exit(0)
+  end
 
+  local item_is_fluid = (items.types[item_id] % (2*items.type_names_to_vals.fluid)) >= items.type_names_to_vals.fluid
+  if item_is_fluid and items.disallowed_val_cutoff <= items.type_names_to_vals.fluid then
+    items.disallowed_val_cutoff = 2*items.type_names_to_vals.fluid
   end
 
   print_item_and_recipe(recipes, items, item_id, rate)
